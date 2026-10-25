@@ -1,0 +1,268 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MotorcycleStatus {
+  REGISTERED
+  AVAILABLE
+  SOLD
+}
+enum SaleStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+enum SaleType {
+  CASH
+  CREDIT
+}
+enum RecordStatus {
+  DRAFT
+  CONFIRMED
+  VOIDED
+}
+enum IdentifierType {
+  ENGINE
+  CHASSIS
+  PLATE
+}
+enum IdentifierStatus {
+  ACTIVE
+  REPLACED
+}
+enum ExpenseScope {
+  MOTORCYCLE
+  GENERAL
+  BOTH
+}
+enum ApplicationStatus {
+  APPLIED
+  REVIEW_REQUIRED
+}
+
+model Brand {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(80)
+  normalized  String   @unique @db.VarChar(80)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  motorcycles Motorcycle[]
+  rules       PercentageRule[]
+}
+
+model Motorcycle {
+  id                  String           @id @default(uuid()) @db.Uuid
+  brandId             String           @db.Uuid
+  line                String           @db.VarChar(100)
+  modelYear           Int
+  color               String           @db.VarChar(60)
+  displacementCc      Int
+  salePriceCop        Decimal          @db.Decimal(14, 2)
+  acquisitionCostCop  Decimal          @db.Decimal(14, 2)
+  status              MotorcycleStatus @default(REGISTERED)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  brand               Brand            @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  identifiers         MotorcycleIdentifier[]
+  sales               Sale[]
+  expenses            MotorcycleExpense[]
+  @@index([brandId, status])
+}
+
+model MotorcycleIdentifier {
+  id             String           @id @default(uuid()) @db.Uuid
+  motorcycleId   String           @db.Uuid
+  type           IdentifierType
+  value          String           @db.VarChar(100)
+  normalized     String           @db.VarChar(100)
+  status         IdentifierStatus @default(ACTIVE)
+  assignedAt     DateTime         @default(now())
+  replacedAt     DateTime?
+  reason         String?          @db.VarChar(500)
+  motorcycle     Motorcycle       @relation(fields: [motorcycleId], references: [id], onDelete: Restrict)
+  @@index([motorcycleId, type, status])
+}
+
+model Customer {
+  id                    String   @id @default(uuid()) @db.Uuid
+  fullName              String   @db.VarChar(160)
+  documentType          String   @db.VarChar(40)
+  documentNumber        String   @db.VarChar(80)
+  normalizedDocType     String   @db.VarChar(40)
+  normalizedDocNumber   String   @db.VarChar(80)
+  phone                 String?  @db.VarChar(40)
+  email                 String?  @db.VarChar(254)
+  address               String?  @db.VarChar(250)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  sales                 Sale[]
+  @@unique([normalizedDocType, normalizedDocNumber])
+  @@index([fullName])
+}
+
+model Sale {
+  id                    String     @id @default(uuid()) @db.Uuid
+  motorcycleId          String     @db.Uuid
+  customerId            String     @db.Uuid
+  type                  SaleType
+  status                SaleStatus @default(DRAFT)
+  motorcyclePriceCop    Decimal    @db.Decimal(14, 2)
+  saleDate              DateTime?
+  cancellationReason    String?    @db.VarChar(500)
+  cancelledAt           DateTime?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+  motorcycle            Motorcycle @relation(fields: [motorcycleId], references: [id], onDelete: Restrict)
+  customer              Customer   @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  procedures            SaleProcedure[]
+  applications          PercentageApplication[]
+  auditEvents           AuditEvent[]
+  @@index([status, saleDate])
+  @@index([motorcycleId, status])
+  @@index([customerId, saleDate])
+}
+
+model ProcedureType {
+  id        String          @id @default(uuid()) @db.Uuid
+  name      String          @unique @db.VarChar(100)
+  normalized String         @unique @db.VarChar(100)
+  active    Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  records   SaleProcedure[]
+}
+
+model SaleProcedure {
+  id                 String       @id @default(uuid()) @db.Uuid
+  saleId             String       @db.Uuid
+  procedureTypeId    String       @db.Uuid
+  nameSnapshot       String       @db.VarChar(100)
+  description        String?      @db.VarChar(500)
+  customerAmountCop  Decimal      @db.Decimal(14, 2)
+  businessCostCop    Decimal      @db.Decimal(14, 2)
+  procedureDate      DateTime     @db.Date
+  status             RecordStatus @default(DRAFT)
+  voidReason         String?      @db.VarChar(500)
+  replacesId         String?      @db.Uuid
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  sale               Sale         @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  procedureType      ProcedureType @relation(fields: [procedureTypeId], references: [id], onDelete: Restrict)
+  replaces           SaleProcedure? @relation("ProcedureReplacement", fields: [replacesId], references: [id], onDelete: Restrict)
+  replacement        SaleProcedure? @relation("ProcedureReplacement")
+  @@unique([replacesId])
+  @@index([saleId, procedureDate, status])
+}
+
+model ExpenseCategory {
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String       @db.VarChar(100)
+  normalized String      @unique @db.VarChar(100)
+  scope     ExpenseScope
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  motorcycleExpenses MotorcycleExpense[]
+  generalExpenses GeneralExpense[]
+}
+
+model MotorcycleExpense {
+  id            String       @id @default(uuid()) @db.Uuid
+  motorcycleId  String       @db.Uuid
+  categoryId    String       @db.Uuid
+  expenseDate   DateTime     @db.Date
+  description   String       @db.VarChar(500)
+  amountCop     Decimal      @db.Decimal(14, 2)
+  status        RecordStatus @default(DRAFT)
+  voidReason    String?      @db.VarChar(500)
+  replacesId    String?      @db.Uuid
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  motorcycle    Motorcycle   @relation(fields: [motorcycleId], references: [id], onDelete: Restrict)
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  replaces      MotorcycleExpense? @relation("MotorcycleExpenseReplacement", fields: [replacesId], references: [id], onDelete: Restrict)
+  replacement   MotorcycleExpense? @relation("MotorcycleExpenseReplacement")
+  @@unique([replacesId])
+  @@index([motorcycleId, expenseDate, status])
+  @@index([categoryId, expenseDate])
+}
+
+model GeneralExpense {
+  id            String       @id @default(uuid()) @db.Uuid
+  categoryId    String       @db.Uuid
+  expenseDate   DateTime     @db.Date
+  description   String       @db.VarChar(500)
+  amountCop     Decimal      @db.Decimal(14, 2)
+  status        RecordStatus @default(DRAFT)
+  voidReason    String?      @db.VarChar(500)
+  replacesId    String?      @db.Uuid
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  replaces      GeneralExpense? @relation("GeneralExpenseReplacement", fields: [replacesId], references: [id], onDelete: Restrict)
+  replacement   GeneralExpense? @relation("GeneralExpenseReplacement")
+  @@index([categoryId, expenseDate, status])
+  @@unique([replacesId])
+}
+
+model PercentageRule {
+  id               String   @id @default(uuid()) @db.Uuid
+  brandId          String   @db.Uuid
+  ratePercent      Decimal  @db.Decimal(7, 4)
+  effectiveFrom    DateTime @db.Date
+  effectiveTo      DateTime? @db.Date
+  version          Int
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  brand            Brand    @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  applications    PercentageApplication[]
+  @@unique([brandId, version])
+  @@index([brandId, effectiveFrom, effectiveTo])
+}
+
+model PercentageApplication {
+  id                  String   @id @default(uuid()) @db.Uuid
+  saleId              String   @db.Uuid
+  ruleId              String   @db.Uuid
+  brandNameSnapshot   String   @db.VarChar(80)
+  ratePercentSnapshot Decimal  @db.Decimal(7, 4)
+  baseCop             Decimal  @db.Decimal(14, 2)
+  amountCop           Decimal  @db.Decimal(14, 2)
+  appliedAt           DateTime @default(now())
+  status              ApplicationStatus @default(APPLIED)
+  manualReason        String?  @db.VarChar(500)
+  sale                Sale     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  rule                PercentageRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  adjustments         PercentageAdjustment[]
+  @@unique([saleId])
+  @@index([saleId, appliedAt])
+}
+
+model PercentageAdjustment {
+  id             String   @id @default(uuid()) @db.Uuid
+  applicationId  String   @db.Uuid
+  amountDeltaCop Decimal  @db.Decimal(14, 2)
+  reason         String   @db.VarChar(500)
+  createdAt      DateTime @default(now())
+  application   PercentageApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  @@index([applicationId, createdAt])
+}
+
+model AuditEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  entityType  String   @db.VarChar(80)
+  entityId    String   @db.Uuid
+  operation   String   @db.VarChar(80)
+  changes     Json
+  reason      String?  @db.VarChar(500)
+  occurredAt  DateTime @default(now())
+  saleId      String?  @db.Uuid
+  sale        Sale?    @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  @@index([entityType, entityId, occurredAt])
+}
